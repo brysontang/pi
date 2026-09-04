@@ -12,7 +12,7 @@ const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
 const outputLockfilePath = join(outputDir, "package-lock.json");
 const internalPackagePrefix = "@earendil-works/pi-";
-const internalPackageNames = new Set(["@earendil-works/chord"]);
+const internalPackageNames = new Set(["@earendil-works/chord", "@earendil-works/clipboard"]);
 const installPackageName = "@earendil-works/pi-coding-agent-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
@@ -39,6 +39,11 @@ function packageDependencies(entry) {
 		...(entry.dependencies ?? {}),
 		...(entry.optionalDependencies ?? {}),
 	};
+}
+
+function dependencyQueueItems(entry, from) {
+	const optionalNames = new Set(Object.keys(entry.optionalDependencies ?? {}));
+	return Object.keys(packageDependencies(entry)).map((name) => ({ name, from, optional: optionalNames.has(name) }));
 }
 
 function sortedObject(object) {
@@ -201,18 +206,16 @@ function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
 	);
 }
 
-function addInternalWorkspace(installLockPackages, addedPaths, queue, name, workspace) {
+function addInternalWorkspace(installLockPackages, addedPaths, queue, name, workspace, optional) {
 	const packageJson = workspace.packageJson;
 	const outputPath = `node_modules/${name}`;
 	const entry = copyPackageJsonEntry(packageJson, { includeName: false });
 	entry.resolved = registryTarballUrl(name, packageJson.version);
+	if (optional) entry.optional = true;
 
 	installLockPackages[outputPath] = sortedPackageEntry(entry);
 	addedPaths.add(outputPath);
-
-	for (const dependencyName of Object.keys(packageDependencies(packageJson))) {
-		queue.push({ name: dependencyName, from: outputPath });
-	}
+	queue.push(...dependencyQueueItems(packageJson, outputPath));
 }
 
 function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, name, from) {
@@ -376,7 +379,7 @@ function generateInstallLock() {
 	};
 	const addedPaths = new Set([""]);
 	const internalNames = new Set();
-	const queue = Object.keys(packageDependencies(installerPackageJson)).map((name) => ({ name, from: "" }));
+	const queue = dependencyQueueItems(installerPackageJson, "");
 
 	while (queue.length > 0) {
 		const item = queue.shift();
@@ -389,7 +392,7 @@ function generateInstallLock() {
 			const outputPath = `node_modules/${item.name}`;
 			internalNames.add(item.name);
 			if (!addedPaths.has(outputPath)) {
-				addInternalWorkspace(installLockPackages, addedPaths, queue, item.name, workspace);
+				addInternalWorkspace(installLockPackages, addedPaths, queue, item.name, workspace, item.optional);
 			}
 			continue;
 		}

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Moved the native clipboard dependency into the monorepo as `@earendil-works/clipboard` and bundled its checked-in platform prebuilds directly in that package.
+
 ## [0.85.0] - 2026-09-04
 
 ### New Features

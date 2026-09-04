@@ -4,11 +4,10 @@
 # Mirrors .github/workflows/build-binaries.yml
 #
 # Usage:
-#   ./scripts/build-binaries.sh [--skip-install] [--skip-deps] [--skip-build] [--offline-model-data] [--platform <platform>] [--out <dir>]
+#   ./scripts/build-binaries.sh [--skip-install] [--skip-build] [--offline-model-data] [--platform <platform>] [--out <dir>]
 #
 # Options:
 #   --skip-install       Skip npm ci
-#   --skip-deps          Skip installing cross-platform dependencies
 #   --skip-build         Skip the package build
 #   --offline-model-data Build with bundled model data instead of refreshing it
 #   --platform <name>    Build only for specified platform (darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64, windows-arm64)
@@ -28,7 +27,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SKIP_INSTALL=false
-SKIP_DEPS=false
 SKIP_BUILD=false
 OFFLINE_MODEL_DATA=false
 PLATFORM=""
@@ -38,10 +36,6 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-install)
             SKIP_INSTALL=true
-            shift
-            ;;
-        --skip-deps)
-            SKIP_DEPS=true
             shift
             ;;
         --skip-build)
@@ -94,45 +88,6 @@ else
     echo "==> Skipping npm ci (--skip-install)"
 fi
 
-if [[ "$SKIP_DEPS" == "false" ]]; then
-    echo "==> Installing cross-platform native bindings..."
-    CLIPBOARD_VERSION=$(node -p "require('./packages/coding-agent/package.json').optionalDependencies['@mariozechner/clipboard']")
-    # npm ci only installs optional deps for the current platform. Install the
-    # cross-platform packages in isolation so npm does not re-resolve and mutate
-    # the workspace dependency graph, which can trigger npm/arborist failures.
-    NATIVE_DEPS_DIR=$(mktemp -d)
-    cleanup_native_deps() {
-        rm -rf "$NATIVE_DEPS_DIR"
-    }
-    trap cleanup_native_deps EXIT
-    printf '%s\n' '{"private":true}' > "$NATIVE_DEPS_DIR/package.json"
-    # Use --force to bypass platform checks (os/cpu restrictions in package.json).
-    npm install --prefix "$NATIVE_DEPS_DIR" --include=optional --no-save --package-lock=false --force --ignore-scripts \
-        @mariozechner/clipboard@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-darwin-arm64@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-darwin-x64@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-linux-x64-gnu@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-linux-arm64-gnu@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-win32-x64-msvc@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-win32-arm64-msvc@"$CLIPBOARD_VERSION"
-    mkdir -p node_modules/@mariozechner
-    for package in \
-        clipboard \
-        clipboard-darwin-arm64 \
-        clipboard-darwin-x64 \
-        clipboard-linux-x64-gnu \
-        clipboard-linux-arm64-gnu \
-        clipboard-win32-x64-msvc \
-        clipboard-win32-arm64-msvc; do
-        rm -rf "node_modules/@mariozechner/$package"
-        cp -R "$NATIVE_DEPS_DIR/node_modules/@mariozechner/$package" node_modules/@mariozechner/
-    done
-    cleanup_native_deps
-    trap - EXIT
-else
-    echo "==> Skipping cross-platform native bindings (--skip-deps)"
-fi
-
 if [[ "$SKIP_BUILD" == "false" ]]; then
     if [[ "$OFFLINE_MODEL_DATA" == "true" ]]; then
         echo "==> Building all packages with bundled model data..."
@@ -162,27 +117,27 @@ fi
 set_clipboard_target() {
     case "$1" in
         darwin-arm64)
-            clipboard_native_package="clipboard-darwin-arm64"
+            clipboard_native_dir="native/darwin/prebuilds/darwin-arm64"
             clipboard_native_file="clipboard.darwin-arm64.node"
             ;;
         darwin-x64)
-            clipboard_native_package="clipboard-darwin-x64"
+            clipboard_native_dir="native/darwin/prebuilds/darwin-x64"
             clipboard_native_file="clipboard.darwin-x64.node"
             ;;
         linux-x64)
-            clipboard_native_package="clipboard-linux-x64-gnu"
+            clipboard_native_dir="native/linux/prebuilds/linux-x64-gnu"
             clipboard_native_file="clipboard.linux-x64-gnu.node"
             ;;
         linux-arm64)
-            clipboard_native_package="clipboard-linux-arm64-gnu"
+            clipboard_native_dir="native/linux/prebuilds/linux-arm64-gnu"
             clipboard_native_file="clipboard.linux-arm64-gnu.node"
             ;;
         windows-x64)
-            clipboard_native_package="clipboard-win32-x64-msvc"
+            clipboard_native_dir="native/win32/prebuilds/win32-x64-msvc"
             clipboard_native_file="clipboard.win32-x64-msvc.node"
             ;;
         windows-arm64)
-            clipboard_native_package="clipboard-win32-arm64-msvc"
+            clipboard_native_dir="native/win32/prebuilds/win32-arm64-msvc"
             clipboard_native_file="clipboard.win32-arm64-msvc.node"
             ;;
     esac
@@ -225,10 +180,12 @@ for platform in "${PLATFORMS[@]}"; do
     cp -r examples "$OUTPUT_DIR/$platform/"
 
     set_clipboard_target "$platform"
-    mkdir -p "$OUTPUT_DIR/$platform/node_modules/@mariozechner"
-    cp -r ../../node_modules/@mariozechner/clipboard "$OUTPUT_DIR/$platform/node_modules/@mariozechner/"
-    cp "../../node_modules/@mariozechner/$clipboard_native_package/$clipboard_native_file" \
-        "$OUTPUT_DIR/$platform/node_modules/@mariozechner/clipboard/"
+    clipboard_destination="$OUTPUT_DIR/$platform/node_modules/@earendil-works/clipboard"
+    mkdir -p "$clipboard_destination/$clipboard_native_dir"
+    cp ../clipboard/package.json "$clipboard_destination/"
+    cp -R ../clipboard/dist "$clipboard_destination/"
+    cp "../clipboard/$clipboard_native_dir/$clipboard_native_file" \
+        "$clipboard_destination/$clipboard_native_dir/"
 
     # Copy terminal input native helpers next to compiled binaries.
     if [[ "$platform" == darwin-* ]]; then

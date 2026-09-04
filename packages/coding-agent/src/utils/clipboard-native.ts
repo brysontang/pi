@@ -20,7 +20,7 @@ export function loadClipboardNative(
 ): ClipboardModule | null {
 	for (const requireClipboard of requires) {
 		try {
-			return requireClipboard("@mariozechner/clipboard") as ClipboardModule;
+			return requireClipboard("@earendil-works/clipboard") as ClipboardModule;
 		} catch {
 			// Try the next resolution root.
 		}

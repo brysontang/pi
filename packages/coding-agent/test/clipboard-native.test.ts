@@ -18,8 +18,8 @@ describe("loadClipboardNative", () => {
 		const fallback = vi.fn<ClipboardRequire>(() => fakeClipboard);
 
 		expect(loadClipboardNative([primary, fallback])).toBe(fakeClipboard);
-		expect(primary).toHaveBeenCalledWith("@mariozechner/clipboard");
-		expect(fallback).toHaveBeenCalledWith("@mariozechner/clipboard");
+		expect(primary).toHaveBeenCalledWith("@earendil-works/clipboard");
+		expect(fallback).toHaveBeenCalledWith("@earendil-works/clipboard");
 	});
 
 	test("returns null when no require root can load clipboard", () => {

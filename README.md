@@ -27,6 +27,7 @@ To learn more about Pi:
 
 | Package | Description |
 |---------|-------------|
+| **[@earendil-works/clipboard](packages/clipboard)** | Native clipboard access for Node.js and Bun |
 | **[@earendil-works/chord](packages/chord)** | Standalone application-composition runtime for services, replicated state, RPC, and plugins |
 | **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
 | **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
@@ -72,7 +73,7 @@ cd "pi-${VERSION}"
 ./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
 ```
 
-The source archive includes the generated provider model data used for the release. `--offline-model-data` builds with that snapshot instead of refreshing it from live provider catalogs. The script still installs dependencies, builds the monorepo, compiles the Bun executable, and stages its runtime assets. Package maintainers who provide dependencies separately can pass `--skip-install --skip-deps`.
+The source archive includes the generated provider model data and checked-in native prebuilds used for the release. `--offline-model-data` builds with that snapshot instead of refreshing it from live provider catalogs. The script still installs dependencies, builds the monorepo, compiles the Bun executable, and stages its runtime assets. Package maintainers who provide dependencies separately can pass `--skip-install`.
 
 ## Supply-chain hardening
 

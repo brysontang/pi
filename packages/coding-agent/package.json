@@ -79,7 +79,7 @@
 		}
 	},
 	"optionalDependencies": {
-		"@mariozechner/clipboard": "0.3.9"
+		"@earendil-works/clipboard": "^0.85.0"
 	},
 	"devDependencies": {
 		"@types/cross-spawn": "6.0.6",
