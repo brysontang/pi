@@ -250,7 +250,7 @@ async function runLoop(
 			};
 
 			if (await config.shouldStopAfterTurn?.(lastCompletedTurn)) {
-				await emit({ type: "agent_end", messages: newMessages });
+				await emit({ type: "agent_end", messages: newMessages, reason: "stop_after_turn" });
 				return;
 			}
 

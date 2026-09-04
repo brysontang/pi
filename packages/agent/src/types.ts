@@ -431,7 +431,12 @@ export interface AgentContext {
 export type AgentEvent =
 	// Agent lifecycle
 	| { type: "agent_start" }
-	| { type: "agent_end"; messages: AgentMessage[] }
+	| {
+			type: "agent_end";
+			messages: AgentMessage[];
+			/** Explicit stop requested by shouldStopAfterTurn; queued work remains pending. */
+			reason?: "stop_after_turn";
+	  }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }
 	| { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }

@@ -143,11 +143,7 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
-	| {
-			type: "agent_end";
-			messages: AgentMessage[];
-			willRetry: boolean;
-	  }
+	| (Extract<AgentEvent, { type: "agent_end" }> & { willRetry: boolean })
 	| { type: "agent_settled" }
 	| {
 			type: "queue_update";
@@ -638,9 +634,13 @@ export class AgentSession {
 
 	// Track last assistant message for auto-compaction check
 	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
+	private _lastAgentEndReason: Extract<AgentEvent, { type: "agent_end" }>["reason"];
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "agent_end") {
+			this._lastAgentEndReason = event.reason;
+		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -723,6 +723,7 @@ export class AgentSession {
 	};
 
 	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
+		if (event.reason === "stop_after_turn") return false;
 		const settings = this.settingsManager.getRetrySettings();
 		if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
 			return false;
@@ -1120,6 +1121,11 @@ export class AgentSession {
 	private async _handlePostAgentRun(): Promise<boolean> {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
+		const reason = this._lastAgentEndReason;
+		this._lastAgentEndReason = undefined;
+		// A graceful stop leaves the transcript and queues at the completed-turn
+		// boundary. Only an explicit new prompt/continuation may resume work.
+		if (reason === "stop_after_turn") return false;
 		if (!msg) {
 			return false;
 		}
