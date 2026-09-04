@@ -36,12 +36,7 @@ import {
 	restoreServerPluginPackageProfile,
 	writeSessionPluginPackageProfile,
 } from "./plugins/package.ts";
-import {
-	consumeInternalProcessRole,
-	isDirectInternalProcessEntry,
-	spawnInternalProcess,
-	terminateInternalProcess,
-} from "./process.ts";
+import { spawnInternalProcess, terminateInternalProcess } from "./process.ts";
 import { RadiusRelayAuthResolver } from "./radius-auth.ts";
 import { RadiusRelayHost, type RadiusRelayHostStatus } from "./radius-relay.ts";
 import { createExperimentalServerServices } from "./services/server.ts";
@@ -786,13 +781,4 @@ export async function runServerProcess(args: readonly string[]): Promise<void> {
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-if (isDirectInternalProcessEntry(import.meta.url)) {
-	const role = consumeInternalProcessRole();
-	if (role !== "server") throw new Error("Server entrypoint requires an internal server invocation");
-	void runServerProcess(process.argv.slice(2)).catch((error: unknown) => {
-		console.error(error);
-		process.exit(1);
-	});
 }

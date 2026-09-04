@@ -33,12 +33,7 @@ import { ModelRuntime } from "../core/model-runtime.ts";
 import { SettingsManager } from "../core/settings-manager.ts";
 import { COORDINATOR_PROTOCOL_VERSION } from "./coordinator.ts";
 import { createSessionPluginFacetLoader } from "./plugins/bundled.ts";
-import {
-	consumeInternalProcessRole,
-	encodeControlLine,
-	isDirectInternalProcessEntry,
-	MAX_CONTROL_LINE_BYTES,
-} from "./process.ts";
+import { encodeControlLine, MAX_CONTROL_LINE_BYTES } from "./process.ts";
 import {
 	createSessionWorkerServices,
 	type SessionWorkerRuntime,
@@ -873,12 +868,4 @@ async function createCodingAgentHarness(
 
 export function runSessionWorkerProcess(args: readonly string[]): Promise<void> {
 	return runSessionWorkerWithHarness(args, createCodingAgentHarness);
-}
-
-if (isDirectInternalProcessEntry(import.meta.url)) {
-	const role = consumeInternalProcessRole();
-	if (role !== "session-worker") {
-		throw new Error("Session worker entrypoint requires an internal session-worker invocation");
-	}
-	void runSessionWorkerProcess(process.argv.slice(2)).catch(() => process.exit(1));
 }

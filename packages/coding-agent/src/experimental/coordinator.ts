@@ -3,13 +3,7 @@ import { chmod, lstat, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import Type, { type Static } from "typebox";
 import { Check } from "typebox/value";
-import {
-	consumeInternalProcessRole,
-	encodeControlLine,
-	isDirectInternalProcessEntry,
-	MAX_CONTROL_LINE_BYTES,
-	spawnInternalProcess,
-} from "./process.ts";
+import { encodeControlLine, MAX_CONTROL_LINE_BYTES, spawnInternalProcess } from "./process.ts";
 
 export const COORDINATOR_PROTOCOL_VERSION = 3;
 const COORDINATOR_START_TIMEOUT_MS = 10_000;
@@ -599,14 +593,5 @@ async function cleanupSocket(path: string): Promise<void> {
 	if (process.platform === "win32") return;
 	await unlink(path).catch((error: unknown) => {
 		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-	});
-}
-
-if (isDirectInternalProcessEntry(import.meta.url)) {
-	const role = consumeInternalProcessRole();
-	if (role !== "coordinator") throw new Error("Coordinator entrypoint requires an internal coordinator invocation");
-	void runCoordinatorProcess(process.argv.slice(2)).catch((error: unknown) => {
-		console.error(error);
-		process.exit(1);
 	});
 }

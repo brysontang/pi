@@ -1,21 +1,11 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getPackageDir, isBunBinary, isBundledNode } from "../config.ts";
 
 export const INTERNAL_PROCESS_ENV = "__PI_INTERNAL_SPAWN";
 
 export type InternalProcessRole = "coordinator" | "server" | "session-worker";
-
-/** Detect a directly executed source or unbundled internal-process module. */
-export function isDirectInternalProcessEntry(moduleUrl: string): boolean {
-	return (
-		!isBunBinary &&
-		!isBundledNode &&
-		process.argv[1] !== undefined &&
-		resolve(process.argv[1]) === fileURLToPath(moduleUrl)
-	);
-}
 
 /** Read and validate an internal process role without consuming it. */
 export function getInternalProcessRole(): InternalProcessRole | undefined {
@@ -87,13 +77,7 @@ function defaultEntryUrl(role: InternalProcessRole, override: URL | undefined): 
 		return pathToFileURL(join(getPackageDir(), "dist", "bundle", entry));
 	}
 	const javaScript = import.meta.url.endsWith(".js");
-	if (role === "coordinator") {
-		return new URL(javaScript ? "coordinator.js" : "coordinator.ts", import.meta.url);
-	}
-	if (role === "server") {
-		return new URL(javaScript ? "server.js" : "server.ts", import.meta.url);
-	}
-	return new URL(javaScript ? "session-worker.js" : "session-worker.ts", import.meta.url);
+	return new URL(`${role}-entry.${javaScript ? "js" : "ts"}`, import.meta.url);
 }
 
 export const MAX_CONTROL_LINE_BYTES = 128 * 1024 * 1024;
