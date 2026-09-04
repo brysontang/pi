@@ -145,24 +145,10 @@ describe("readClipboardImage", () => {
 		expect(Array.from(result?.bytes ?? [])).toEqual([4, 5, 6]);
 	});
 
-	test("Non-Wayland: uses clipboard", async () => {
-		mocks.spawnSync.mockImplementation(() => {
-			throw new Error(
-				"spawnSync should not be called for non-Wayland sessions when native clipboard returns an image",
-			);
+	test("Non-Wayland Linux: uses xclip and never calls the native clipboard", async () => {
+		mocks.clipboard.hasImage.mockImplementation(() => {
+			throw new Error("clipboard.hasImage should not be called on Linux");
 		});
-
-		mocks.clipboard.hasImage.mockReturnValue(true);
-		mocks.clipboard.getImageBinary.mockResolvedValue(new Uint8Array([7]));
-
-		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
-		const result = await readClipboardImage({ platform: "linux", env: {} });
-		expect(result).not.toBeNull();
-		expect(result?.mimeType).toBe("image/png");
-		expect(Array.from(result?.bytes ?? [])).toEqual([7]);
-	});
-
-	test("Non-Wayland: falls back to xclip when clipboard has no image", async () => {
 		mocks.spawnSync.mockImplementation((command, args, _options) => {
 			if (command === "xclip" && args.includes("TARGETS")) {
 				return spawnOk(Buffer.from("image/png\n", "utf-8"));
@@ -173,12 +159,24 @@ describe("readClipboardImage", () => {
 			throw new Error(`Unexpected spawnSync call: ${command} ${args.join(" ")}`);
 		});
 
-		mocks.clipboard.hasImage.mockReturnValue(false);
-
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
 		const result = await readClipboardImage({ platform: "linux", env: {} });
 		expect(result).not.toBeNull();
 		expect(result?.mimeType).toBe("image/png");
 		expect(Array.from(result?.bytes ?? [])).toEqual([8, 9]);
+	});
+
+	test("macOS: uses the native clipboard", async () => {
+		mocks.spawnSync.mockImplementation(() => {
+			throw new Error("spawnSync should not be called when the native clipboard returns an image");
+		});
+		mocks.clipboard.hasImage.mockReturnValue(true);
+		mocks.clipboard.getImageBinary.mockResolvedValue(new Uint8Array([7]));
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+		const result = await readClipboardImage({ platform: "darwin", env: {} });
+		expect(result).not.toBeNull();
+		expect(result?.mimeType).toBe("image/png");
+		expect(Array.from(result?.bytes ?? [])).toEqual([7]);
 	});
 });

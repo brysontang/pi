@@ -5,7 +5,11 @@
  * This tests the fix for WSL2/WSLg where clipboard often provides image/bmp
  * instead of image/png.
  */
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+	getImageBinary: vi.fn<() => Promise<Uint8Array>>(),
+}));
 
 function createTinyBmp1x1Red24bpp(): Uint8Array {
 	// Minimal 1x1 24bpp BMP (BGR + row padding to 4 bytes)
@@ -59,14 +63,18 @@ vi.mock("child_process", async () => {
 });
 
 // Mock the native clipboard (not used in Wayland path, but needs to be mocked)
-vi.mock("@earendil-works/clipboard", () => ({
-	default: {
-		hasImage: vi.fn(() => false),
-		getImageBinary: vi.fn(() => Promise.resolve(null)),
+vi.mock("../src/utils/clipboard-native.js", () => ({
+	clipboard: {
+		hasImage: vi.fn(() => true),
+		getImageBinary: mocks.getImageBinary,
 	},
 }));
 
 describe("readClipboardImage BMP conversion", () => {
+	beforeEach(() => {
+		mocks.getImageBinary.mockReset();
+	});
+
 	test("converts BMP to PNG on Wayland/WSLg", async () => {
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
 
@@ -84,5 +92,16 @@ describe("readClipboardImage BMP conversion", () => {
 		expect(image!.bytes[1]).toBe(0x50); // P
 		expect(image!.bytes[2]).toBe(0x4e); // N
 		expect(image!.bytes[3]).toBe(0x47); // G
+	});
+
+	test("converts BMP returned by the Windows native helper to PNG", async () => {
+		mocks.getImageBinary.mockResolvedValue(createTinyBmp1x1Red24bpp());
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+
+		const image = await readClipboardImage({ env: {}, platform: "win32" });
+
+		expect(image).not.toBeNull();
+		expect(image!.mimeType).toBe("image/png");
+		expect(Array.from(image!.bytes.slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
 	});
 });

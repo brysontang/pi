@@ -248,7 +248,8 @@ async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | 
 	}
 
 	const bytes = imageData instanceof Uint8Array ? imageData : Uint8Array.from(imageData);
-	return { bytes, mimeType: "image/png" };
+	const mimeType = bytes[0] === 0x42 && bytes[1] === 0x4d ? "image/bmp" : "image/png";
+	return { bytes, mimeType };
 }
 
 export async function readClipboardImage(options?: {
@@ -268,16 +269,13 @@ export async function readClipboardImage(options?: {
 		const wsl = isWSL(env);
 		const wayland = isWaylandSession(env);
 
-		if (wayland || wsl) {
-			image = readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip();
-		}
+		image =
+			wayland || wsl
+				? (readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip())
+				: readClipboardImageViaXclip();
 
 		if (!image && wsl) {
 			image = readClipboardImageViaPowerShell();
-		}
-
-		if (!image && !wayland) {
-			image = (await readClipboardImageViaNativeClipboard()) ?? readClipboardImageViaXclip();
 		}
 	} else {
 		image = await readClipboardImageViaNativeClipboard();
@@ -287,7 +285,7 @@ export async function readClipboardImage(options?: {
 		return null;
 	}
 
-	// Convert unsupported formats (e.g., BMP from WSLg) to PNG
+	// Convert unsupported formats (e.g., Windows DIB data wrapped as BMP) to PNG
 	if (!isSupportedImageMimeType(image.mimeType)) {
 		const pngBytes = await convertToPng(image.bytes);
 		if (!pngBytes) {

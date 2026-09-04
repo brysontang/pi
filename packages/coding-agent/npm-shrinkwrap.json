@@ -31,9 +31,6 @@
 				"undici": "8.9.0",
 				"yaml": "2.9.0"
 			},
-			"optionalDependencies": {
-				"@earendil-works/clipboard": "^0.85.0"
-			},
 			"bin": {
 				"pi": "dist/bundle/cli.js"
 			},
@@ -487,15 +484,6 @@
 			"engines": {
 				"node": ">=22.19.0"
 			}
-		},
-		"node_modules/@earendil-works/clipboard": {
-			"version": "0.85.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/clipboard/-/clipboard-0.85.0.tgz",
-			"license": "MIT",
-			"engines": {
-				"node": ">=22.19.0"
-			},
-			"optional": true
 		},
 		"node_modules/@earendil-works/pi-agent-core": {
 			"version": "0.85.0",

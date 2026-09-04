@@ -114,35 +114,6 @@ else
     PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64 windows-arm64)
 fi
 
-set_clipboard_target() {
-    case "$1" in
-        darwin-arm64)
-            clipboard_native_dir="native/darwin/prebuilds/darwin-arm64"
-            clipboard_native_file="clipboard.darwin-arm64.node"
-            ;;
-        darwin-x64)
-            clipboard_native_dir="native/darwin/prebuilds/darwin-x64"
-            clipboard_native_file="clipboard.darwin-x64.node"
-            ;;
-        linux-x64)
-            clipboard_native_dir="native/linux/prebuilds/linux-x64-gnu"
-            clipboard_native_file="clipboard.linux-x64-gnu.node"
-            ;;
-        linux-arm64)
-            clipboard_native_dir="native/linux/prebuilds/linux-arm64-gnu"
-            clipboard_native_file="clipboard.linux-arm64-gnu.node"
-            ;;
-        windows-x64)
-            clipboard_native_dir="native/win32/prebuilds/win32-x64-msvc"
-            clipboard_native_file="clipboard.win32-x64-msvc.node"
-            ;;
-        windows-arm64)
-            clipboard_native_dir="native/win32/prebuilds/win32-arm64-msvc"
-            clipboard_native_file="clipboard.win32-arm64-msvc.node"
-            ;;
-    esac
-}
-
 for platform in "${PLATFORMS[@]}"; do
     echo "Building for $platform..."
     bun_target="bun-$platform"
@@ -179,18 +150,10 @@ for platform in "${PLATFORMS[@]}"; do
     cp -r docs "$OUTPUT_DIR/$platform/"
     cp -r examples "$OUTPUT_DIR/$platform/"
 
-    set_clipboard_target "$platform"
-    clipboard_destination="$OUTPUT_DIR/$platform/node_modules/@earendil-works/clipboard"
-    mkdir -p "$clipboard_destination/$clipboard_native_dir"
-    cp ../clipboard/package.json "$clipboard_destination/"
-    cp -R ../clipboard/dist "$clipboard_destination/"
-    cp "../clipboard/$clipboard_native_dir/$clipboard_native_file" \
-        "$clipboard_destination/$clipboard_native_dir/"
-
-    # Copy terminal input native helpers next to compiled binaries.
+    # Copy native platform helpers next to compiled binaries.
     if [[ "$platform" == darwin-* ]]; then
         mkdir -p "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform"
-        cp ../tui/native/darwin/prebuilds/$platform/darwin-modifiers.node "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform/"
+        cp ../tui/native/darwin/prebuilds/$platform/darwin-platform.node "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform/"
     fi
     if [[ "$platform" == windows-* ]]; then
         if [[ "$platform" == "windows-arm64" ]]; then
@@ -199,7 +162,7 @@ for platform in "${PLATFORMS[@]}"; do
             win32_arch_dir="win32-x64"
         fi
         mkdir -p "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir"
-        cp ../tui/native/win32/prebuilds/$win32_arch_dir/win32-console-mode.node "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir/"
+        cp ../tui/native/win32/prebuilds/$win32_arch_dir/win32-platform.node "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir/"
     fi
 done
 

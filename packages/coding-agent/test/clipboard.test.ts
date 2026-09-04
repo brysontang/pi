@@ -100,7 +100,7 @@ describe("readClipboardText", () => {
 		await expect(readClipboardText()).resolves.toBe("clipboard text");
 	});
 
-	test("reads the Wayland clipboard before the stale native X11 clipboard", async () => {
+	test("reads the Wayland clipboard without consulting X11 tools", async () => {
 		// Regression test for #7248.
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
@@ -128,16 +128,51 @@ describe("readClipboardText", () => {
 		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
 	});
 
-	test("falls back to the native clipboard when wl-paste is unavailable", async () => {
+	test("falls back to xclip when wl-paste is unavailable", async () => {
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
 		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
-		mockedExecFileSync.mockImplementation(() => {
-			throw new Error("wl-paste unavailable");
+		vi.stubEnv("DISPLAY", ":0");
+		mockedExecFileSync.mockImplementation((command) => {
+			if (command === "wl-paste") throw new Error("wl-paste unavailable");
+			if (command === "xclip") return "X11 fallback text";
+			throw new Error(`Unexpected command: ${command}`);
 		});
-		mocks.clipboard.getText.mockResolvedValue("X11 fallback text");
 
 		await expect(readClipboardText()).resolves.toBe("X11 fallback text");
+		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
+	});
+
+	test("falls back from xclip to xsel on X11", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("DISPLAY", ":0");
+		mockedExecFileSync.mockImplementation((command) => {
+			if (command === "xclip") throw new Error("xclip unavailable");
+			if (command === "xsel") return "xsel text";
+			throw new Error(`Unexpected command: ${command}`);
+		});
+
+		await expect(readClipboardText()).resolves.toBe("xsel text");
+		expect(mockedExecFileSync).toHaveBeenLastCalledWith("xsel", ["--clipboard", "--output"], {
+			encoding: "utf8",
+			maxBuffer: 50 * 1024 * 1024,
+			timeout: 5000,
+		});
+		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
+	});
+
+	test("reads clipboard text through Termux:API", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("TERMUX_VERSION", "0.119");
+		mockedExecFileSync.mockReturnValue("Termux text");
+
+		await expect(readClipboardText()).resolves.toBe("Termux text");
+		expect(mockedExecFileSync).toHaveBeenCalledWith("termux-clipboard-get", [], {
+			encoding: "utf8",
+			maxBuffer: 50 * 1024 * 1024,
+			timeout: 5000,
+		});
+		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
 	});
 
 	test("returns null for empty or unavailable clipboard text", async () => {

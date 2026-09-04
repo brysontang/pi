@@ -1,5 +1,7 @@
 # Windows native prebuilds
 
+The native platform helper provides console input setup, modifier-key state, and text/image clipboard access.
+
 Build both Windows architectures from the repository root:
 
 ```sh
@@ -19,4 +21,4 @@ CC_ARM64=/path/to/aarch64-w64-mingw32-gcc \
 npm --prefix packages/tui run build:native:win32
 ```
 
-The addon intentionally avoids the C runtime and links only against `kernel32`.
+The addon intentionally avoids the C runtime and links only against `kernel32` and `user32`.
