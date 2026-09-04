@@ -155,6 +155,11 @@ for platform in "${PLATFORMS[@]}"; do
         mkdir -p "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform"
         cp ../tui/native/darwin/prebuilds/$platform/darwin-platform.node "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform/"
     fi
+    if [[ "$platform" == linux-* ]]; then
+        mkdir -p "$OUTPUT_DIR/$platform/native/linux/prebuilds/$platform"
+        cp ../tui/native/linux/prebuilds/$platform/linux-platform-wayland.node "$OUTPUT_DIR/$platform/native/linux/prebuilds/$platform/"
+        cp ../tui/native/linux/prebuilds/$platform/linux-platform-x11.node "$OUTPUT_DIR/$platform/native/linux/prebuilds/$platform/"
+    fi
     if [[ "$platform" == windows-* ]]; then
         if [[ "$platform" == "windows-arm64" ]]; then
             win32_arch_dir="win32-arm64"

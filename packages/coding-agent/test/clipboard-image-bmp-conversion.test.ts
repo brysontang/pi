@@ -62,12 +62,12 @@ vi.mock("child_process", async () => {
 	};
 });
 
-// Mock the native clipboard (not used in Wayland path, but needs to be mocked)
+// Mock the native clipboard reader used after command fallbacks.
 vi.mock("../src/utils/clipboard-native.js", () => ({
-	clipboard: {
+	getClipboardReader: () => ({
 		hasImage: vi.fn(() => true),
 		getImageBinary: mocks.getImageBinary,
-	},
+	}),
 }));
 
 describe("readClipboardImage BMP conversion", () => {

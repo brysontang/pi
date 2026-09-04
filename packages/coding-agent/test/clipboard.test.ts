@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
 			getText: vi.fn<() => Promise<string>>(),
 			setText: vi.fn<(text: string) => Promise<void>>(),
 		},
+		getClipboardWriter: vi.fn(),
 		execFileSync: vi.fn(),
 		execSync: vi.fn(),
 		spawn: vi.fn(),
@@ -19,7 +20,8 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../src/utils/clipboard-native.js", () => {
 	return {
-		clipboard: mocks.clipboard,
+		getClipboardReader: () => mocks.clipboard,
+		getClipboardWriter: mocks.getClipboardWriter,
 	};
 });
 
@@ -65,6 +67,8 @@ beforeEach(() => {
 	nativeResolved = false;
 	mocks.clipboard.getText.mockReset();
 	mocks.clipboard.setText.mockReset();
+	mocks.getClipboardWriter.mockReset();
+	mocks.getClipboardWriter.mockReturnValue(mocks.clipboard);
 	mocks.execFileSync.mockReset();
 	mocks.execSync.mockReset();
 	mocks.spawn.mockReset();
@@ -161,6 +165,20 @@ describe("readClipboardText", () => {
 		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
 	});
 
+	test("falls back to the native reader when Linux clipboard tools are unavailable", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("DISPLAY", ":0");
+		mocks.isWaylandSession.mockReturnValue(true);
+		mockedExecFileSync.mockImplementation(() => {
+			throw new Error("clipboard tool unavailable");
+		});
+		mocks.clipboard.getText.mockResolvedValue("native Linux text");
+
+		await expect(readClipboardText()).resolves.toBe("native Linux text");
+		expect(mocks.clipboard.getText).toHaveBeenCalledOnce();
+	});
+
 	test("reads clipboard text through Termux:API", async () => {
 		mockedPlatform.mockReturnValue("linux");
 		vi.stubEnv("TERMUX_VERSION", "0.119");
@@ -191,6 +209,21 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(0);
 		expect(mockedExecSync).not.toHaveBeenCalled();
 		expect(mockedSpawn).not.toHaveBeenCalled();
+	});
+
+	test("Linux skips the native writer", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("DISPLAY", ":0");
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("hello");
+
+		expect(mocks.getClipboardWriter).not.toHaveBeenCalled();
+		expect(mockedExecSync).toHaveBeenCalledWith("xclip -selection clipboard", {
+			input: "hello",
+			stdio: ["pipe", "ignore", "ignore"],
+			timeout: 5000,
+		});
 	});
 
 	test("remote native success emits OSC 52 after native write", async () => {

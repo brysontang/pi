@@ -76,7 +76,12 @@ export {
 // LaTeX rendering
 export { type RenderLatexOptions, renderLatex } from "./latex.ts";
 // Native platform integration
-export { getNativeClipboard, type NativeClipboard } from "./native-platform.ts";
+export {
+	getNativeClipboard,
+	getNativeClipboardReader,
+	type NativeClipboard,
+	type NativeClipboardReader,
+} from "./native-platform.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
 // Terminal interface and implementations

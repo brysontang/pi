@@ -1,7 +1,7 @@
 import { type ExecFileSyncOptionsWithStringEncoding, execFileSync, execSync, spawn } from "child_process";
 import { platform } from "os";
 import { isWaylandSession } from "./clipboard-image.ts";
-import { clipboard } from "./clipboard-native.ts";
+import { getClipboardReader, getClipboardWriter } from "./clipboard-native.ts";
 
 type NativeClipboardExecOptions = {
 	input: string;
@@ -77,13 +77,13 @@ export async function readClipboardText(): Promise<string | null> {
 			const result = readX11ClipboardText();
 			if (result.ok) return result.text;
 		}
-		return null;
 	}
 
-	if (!clipboard) return null;
+	const clipboardReader = getClipboardReader();
+	if (!clipboardReader) return null;
 
 	try {
-		const text = await clipboard.getText();
+		const text = await clipboardReader.getText();
 		return text || null;
 	} catch {
 		return null;
@@ -102,9 +102,12 @@ export async function copyToClipboard(text: string): Promise<void> {
 	// On Linux, platform tools (wl-copy, xclip, and xsel) daemonize and retain
 	// clipboard selection ownership after this function returns.
 	try {
-		if (clipboard && p !== "linux") {
-			await clipboard.setText(text);
-			copied = true;
+		if (p !== "linux") {
+			const clipboardWriter = getClipboardWriter();
+			if (clipboardWriter) {
+				await clipboardWriter.setText(text);
+				copied = true;
+			}
 		}
 	} catch {
 		// Fall through to platform-specific clipboard tools.

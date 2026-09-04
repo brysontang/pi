@@ -8,6 +8,7 @@
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json",
 		"build:native:darwin": "native/darwin/build.sh",
+		"build:native:linux": "native/linux/build.sh",
 		"build:native:win32": "node native/win32/build.mjs",
 		"test": "node --test --test-reporter=dot --test-reporter-destination=stdout test/*.test.ts",
 		"prepublishOnly": "npm run clean && npm run build"
@@ -22,6 +23,11 @@
 		"native/darwin/src/**/*.m",
 		"native/darwin/build.sh",
 		"native/darwin/README.md",
+		"native/linux/prebuilds/**/*.node",
+		"native/linux/src/**/*.c",
+		"native/linux/protocol/**/*",
+		"native/linux/build.sh",
+		"native/linux/README.md",
 		"README.md"
 	],
 	"keywords": [
