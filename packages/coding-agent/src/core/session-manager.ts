@@ -29,6 +29,63 @@ import {
 
 export const CURRENT_SESSION_VERSION = 3;
 
+/**
+ * Persistence for the existing SessionManager, not a second session implementation.
+ * References belong to the backend: a JSONL path, a database key, etc.
+ * Writes are synchronous and must throw on failure. Never fall back to another store.
+ */
+export interface SessionStorage {
+	createReference(header: SessionHeader): string;
+	/** undefined means missing; an empty array means an existing empty record. */
+	load(reference: string): FileEntry[] | undefined;
+	/** create must reject an existing reference; rewrite replaces it; append adds entries. */
+	write(reference: string, entries: readonly FileEntry[], mode: "create" | "rewrite" | "append"): void;
+	/** The CLI historically defers new JSONL files until the first assistant response. */
+	readonly deferUntilAssistant?: boolean;
+	/** Filesystem metadata is absent for non-file backends. */
+	readonly directory?: string;
+	getFilePath?(reference: string): string;
+}
+
+/** Native JSONL I/O. Session tree, migrations, context and identity remain in SessionManager. */
+export class JsonlSessionStorage implements SessionStorage {
+	readonly directory: string;
+	readonly deferUntilAssistant: boolean;
+
+	constructor(directory: string, options?: { deferUntilAssistant?: boolean }) {
+		this.directory = normalizePath(directory);
+		this.deferUntilAssistant = options?.deferUntilAssistant ?? true;
+		if (this.directory && !existsSync(this.directory)) mkdirSync(this.directory, { recursive: true });
+	}
+
+	createReference(header: SessionHeader): string {
+		return join(this.directory, `${header.timestamp.replace(/[:.]/g, "-")}_${header.id}.jsonl`);
+	}
+
+	getFilePath(reference: string): string {
+		return resolvePath(reference);
+	}
+
+	load(reference: string): FileEntry[] | undefined {
+		const file = this.getFilePath(reference);
+		if (!existsSync(file)) return undefined;
+		const entries = loadEntriesFromFile(file);
+		if (entries.length === 0 && statSync(file).size > 0) {
+			throw new Error(`Session file is not a valid ${APP_NAME} session: ${file}`);
+		}
+		return entries;
+	}
+
+	write(reference: string, entries: readonly FileEntry[], mode: "create" | "rewrite" | "append"): void {
+		const fd = openSync(this.getFilePath(reference), mode === "create" ? "wx" : mode === "rewrite" ? "w" : "a");
+		try {
+			for (const entry of entries) writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+		} finally {
+			closeSync(fd);
+		}
+	}
+}
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -858,7 +915,7 @@ export class SessionManager {
 	private sessionFile: string | undefined;
 	private sessionDir: string;
 	private cwd: string;
-	private persist: boolean;
+	private readonly storage: SessionStorage | undefined;
 	private flushed: boolean = false;
 	private fileEntries: FileEntry[] = [];
 	private byId: Map<string, SessionEntry> = new Map();
@@ -870,16 +927,13 @@ export class SessionManager {
 		cwd: string,
 		sessionDir: string,
 		sessionFile: string | undefined,
-		persist: boolean,
+		storage: SessionStorage | undefined,
 		newSessionOptions?: NewSessionOptions,
 		preloadedFileEntries?: FileEntry[],
 	) {
 		this.cwd = resolvePath(cwd);
 		this.sessionDir = normalizePath(sessionDir);
-		this.persist = persist;
-		if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
-			mkdirSync(this.sessionDir, { recursive: true });
-		}
+		this.storage = storage;
 
 		if (sessionFile) {
 			this._setSessionFile(sessionFile, preloadedFileEntries);
@@ -890,40 +944,35 @@ export class SessionManager {
 		}
 	}
 
-	/** Switch to a different session file (used for resume and branching) */
-	setSessionFile(sessionFile: string): void {
-		this._setSessionFile(sessionFile);
+	/** Switch within the configured backend. A reference is a path only for JSONL storage. */
+	setSessionFile(reference: string): void {
+		this._setSessionFile(reference);
 	}
 
-	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
-		this.sessionFile = resolvePath(sessionFile);
-		if (existsSync(this.sessionFile)) {
-			const entries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
-
-			// If file was empty, initialize it with a valid session header. If it was
-			// non-empty but did not parse as a pi session, fail without modifying it.
-			if (entries.length === 0) {
-				const explicitPath = this.sessionFile;
-				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid ${APP_NAME} session: ${explicitPath}`);
-				}
-				this.newSession();
-				this.sessionFile = explicitPath;
+	private _setSessionFile(reference: string, preloadedFileEntries?: FileEntry[]): void {
+		if (!this.storage) throw new Error("Cannot open a persisted session without storage");
+		this.sessionFile = this.storage.getFilePath?.(reference) ?? reference;
+		const entries = preloadedFileEntries ?? this.storage.load(this.sessionFile);
+		if (entries === undefined || entries.length === 0) {
+			this._newSession(undefined, this.sessionFile, entries !== undefined);
+			if (entries !== undefined && !this.flushed) {
 				this._rewriteFile();
 				this.flushed = true;
-				return;
 			}
-
-			this._loadEntries(entries);
-			this.flushed = true;
-		} else {
-			const explicitPath = this.sessionFile;
-			this.newSession();
-			this.sessionFile = explicitPath; // preserve explicit path from --session flag
+			return;
 		}
+		if (entries[0].type !== "session" || typeof entries[0].id !== "string" || !entries[0].id) {
+			throw new Error(`Invalid stored session: ${reference}`);
+		}
+		this._loadEntries(entries);
+		this.flushed = true;
 	}
 
 	newSession(options?: NewSessionOptions): string | undefined {
+		return this._newSession(options);
+	}
+
+	private _newSession(options?: NewSessionOptions, reference?: string, replaceEmpty = false): string | undefined {
 		if (options?.id !== undefined) {
 			assertValidSessionId(options.id);
 		}
@@ -944,9 +993,10 @@ export class SessionManager {
 		this.leafId = null;
 		this.flushed = false;
 
-		if (this.persist) {
-			const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-			this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
+		this.sessionFile = this.storage ? (reference ?? this.storage.createReference(header)) : undefined;
+		if (this.storage && !this.storage.deferUntilAssistant && this.sessionFile) {
+			this.storage.write(this.sessionFile, this.fileEntries, replaceEmpty ? "rewrite" : "create");
+			this.flushed = true;
 		}
 		return this.sessionFile;
 	}
@@ -991,19 +1041,12 @@ export class SessionManager {
 	}
 
 	private _rewriteFile(): void {
-		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
-		try {
-			for (const entry of this.fileEntries) {
-				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
-			}
-		} finally {
-			closeSync(fd);
-		}
+		if (!this.storage || !this.sessionFile) return;
+		this.storage.write(this.sessionFile, this.fileEntries, "rewrite");
 	}
 
 	isPersisted(): boolean {
-		return this.persist;
+		return this.storage !== undefined;
 	}
 
 	getCwd(): string {
@@ -1023,43 +1066,62 @@ export class SessionManager {
 	}
 
 	getSessionFile(): string | undefined {
+		return this.sessionFile === undefined ? undefined : this.storage?.getFilePath?.(this.sessionFile);
+	}
+
+	/** Opaque backend reference, distinct from an optional physical JSONL path. */
+	getSessionReference(): string | undefined {
 		return this.sessionFile;
 	}
 
+	/** Create a new manager using the same backend, without selecting JSONL implicitly. */
+	createNew(options?: NewSessionOptions): SessionManager {
+		return new SessionManager(this.cwd, this.sessionDir, undefined, this.storage, options);
+	}
+
+	/** Open within the same backend. Missing references fail rather than inventing history. */
+	openSession(reference: string, cwdOverride?: string): SessionManager {
+		if (!this.storage) throw new Error("Cannot open a persisted session without storage");
+		const entries = this.storage.load(reference);
+		if (!entries?.length || entries[0].type !== "session") throw new Error(`Session not found: ${reference}`);
+		return new SessionManager(
+			cwdOverride ?? getSessionHeaderCwd(entries[0]) ?? this.cwd,
+			this.sessionDir,
+			reference,
+			this.storage,
+			undefined,
+			entries,
+		);
+	}
+
 	_persist(entry: SessionEntry): void {
-		if (!this.persist || !this.sessionFile) return;
-
-		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-		if (!hasAssistant) {
-			if (this.flushed) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
-			} else {
-				// Mark as not flushed so when assistant arrives, all entries get written
-				this.flushed = false;
-			}
+		if (!this.storage || !this.sessionFile) return;
+		if (
+			!this.flushed &&
+			this.storage.deferUntilAssistant &&
+			!this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant")
+		)
 			return;
-		}
-
-		if (!this.flushed) {
-			const fd = openSync(this.sessionFile, "wx");
-			try {
-				for (const e of this.fileEntries) {
-					writeFileSync(fd, `${JSON.stringify(e)}\n`);
-				}
-			} finally {
-				closeSync(fd);
-			}
-			this.flushed = true;
-		} else {
-			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
-		}
+		this.storage.write(
+			this.sessionFile,
+			this.flushed ? [entry] : this.fileEntries,
+			this.flushed ? "append" : "create",
+		);
+		this.flushed = true;
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
 		this.fileEntries.push(entry);
+		try {
+			this._persist(entry);
+		} catch (error) {
+			// A rejected write is not a committed native entry. A later append
+			// must never acquire an unwritten parent through our in-memory index.
+			this.fileEntries.pop();
+			throw error;
+		}
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
-		this._persist(entry);
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.
@@ -1461,17 +1523,16 @@ export class SessionManager {
 
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
-
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
 			id: newSessionId,
 			timestamp,
 			cwd: this.cwd,
-			parentSession: this.persist ? previousSessionFile : undefined,
+			parentSession: this.storage ? previousSessionFile : undefined,
 		};
+
+		const newSessionFile = this.storage?.createReference(header);
 
 		// Collect labels for entries in the path
 		const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
@@ -1482,7 +1543,7 @@ export class SessionManager {
 			}
 		}
 
-		if (this.persist) {
+		if (this.storage && newSessionFile) {
 			// Build label entries
 			const lastEntryId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
 			let parentId = lastEntryId;
@@ -1512,8 +1573,8 @@ export class SessionManager {
 			// and avoiding the duplicate-header bug when _persist()'s
 			// no-assistant guard later resets flushed to false.
 			const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-			if (hasAssistant) {
-				this._rewriteFile();
+			if (hasAssistant || !this.storage.deferUntilAssistant) {
+				this.storage.write(newSessionFile, this.fileEntries, "create");
 				this.flushed = true;
 			} else {
 				this.flushed = false;
@@ -1550,7 +1611,7 @@ export class SessionManager {
 	 */
 	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		return new SessionManager(cwd, dir, undefined, true, options);
+		return new SessionManager(cwd, dir, undefined, new JsonlSessionStorage(dir), options);
 	}
 
 	/**
@@ -1578,7 +1639,7 @@ export class SessionManager {
 		const cwd = cwdOverride ?? (header ? getSessionHeaderCwd(header) : undefined) ?? process.cwd();
 		// If no sessionDir provided, derive from file's parent directory
 		const dir = sessionDir ? normalizePath(sessionDir) : resolve(resolvedPath, "..");
-		return new SessionManager(cwd, dir, resolvedPath, true, undefined, preloadedFileEntries);
+		return new SessionManager(cwd, dir, resolvedPath, new JsonlSessionStorage(dir), undefined, preloadedFileEntries);
 	}
 
 	/**
@@ -1591,14 +1652,32 @@ export class SessionManager {
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
 		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined);
 		if (mostRecent) {
-			return new SessionManager(cwd, dir, mostRecent, true);
+			return new SessionManager(cwd, dir, mostRecent, new JsonlSessionStorage(dir));
 		}
-		return new SessionManager(cwd, dir, undefined, true);
+		return new SessionManager(cwd, dir, undefined, new JsonlSessionStorage(dir));
+	}
+
+	/**
+	 * Compose the native manager with host-owned storage. The backend is used for
+	 * every append, migration, new session and branch; no filesystem is consulted.
+	 */
+	static withStorage(
+		cwd: string,
+		storage: SessionStorage,
+		reference?: string,
+		options?: NewSessionOptions,
+	): SessionManager {
+		if (reference !== undefined) {
+			const entries = storage.load(reference);
+			if (!entries?.length) throw new Error(`Session not found: ${reference}`);
+			return new SessionManager(cwd, storage.directory ?? "", reference, storage, undefined, entries);
+		}
+		return new SessionManager(cwd, storage.directory ?? "", undefined, storage, options);
 	}
 
 	/** Create an in-memory session (no file persistence), optionally from entries held outside the filesystem. */
 	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions, entries?: FileEntry[]): SessionManager {
-		return new SessionManager(cwd, "", undefined, false, options, entries);
+		return new SessionManager(cwd, "", undefined, undefined, options, entries);
 	}
 
 	/**
@@ -1649,16 +1728,13 @@ export class SessionManager {
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
 		};
-		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
-
-		// Copy all non-header entries from source
-		for (const entry of sourceEntries) {
-			if (entry.type !== "session") {
-				appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
-			}
-		}
-
-		return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
+		const storage = new JsonlSessionStorage(dir);
+		storage.write(
+			newSessionFile,
+			[newHeader, ...sourceEntries.filter((entry) => entry.type !== "session")],
+			"create",
+		);
+		return new SessionManager(resolvedTargetCwd, dir, newSessionFile, storage);
 	}
 
 	/**

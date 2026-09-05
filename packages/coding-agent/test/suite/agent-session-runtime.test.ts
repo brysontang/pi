@@ -11,7 +11,7 @@ import {
 	createAgentSessionServices,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { type FileEntry, SessionManager, type SessionStorage } from "../../src/core/session-manager.ts";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
@@ -39,7 +39,12 @@ describe("AgentSessionRuntime characterization", () => {
 
 	async function createRuntimeForTest(
 		extensionFactory: ExtensionFactory,
-		options?: { cwd?: string; bootstrapModel?: boolean; bootstrapThinkingLevel?: boolean },
+		options?: {
+			cwd?: string;
+			bootstrapModel?: boolean;
+			bootstrapThinkingLevel?: boolean;
+			sessionStorage?: SessionStorage;
+		},
 	) {
 		const tempDir =
 			options?.cwd ?? join(tmpdir(), `pi-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -107,7 +112,9 @@ describe("AgentSessionRuntime characterization", () => {
 		const runtime = await createAgentSessionRuntime(createRuntime, {
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(tempDir),
+			sessionManager: options?.sessionStorage
+				? SessionManager.withStorage(tempDir, options.sessionStorage)
+				: SessionManager.create(tempDir),
 		});
 		await runtime.session.bindExtensions({});
 
@@ -121,6 +128,38 @@ describe("AgentSessionRuntime characterization", () => {
 
 		return { runtime, faux, tempDir };
 	}
+
+	it("retains non-file storage across new, fork and resume", async () => {
+		const records = new Map<string, FileEntry[]>();
+		const storage: SessionStorage = {
+			createReference: (header) => header.id,
+			load: (reference) => structuredClone(records.get(reference)),
+			write: (reference, entries, mode) => {
+				if (mode === "create" && records.has(reference)) throw new Error("duplicate session");
+				records.set(
+					reference,
+					structuredClone(mode === "append" ? [...records.get(reference)!, ...entries] : [...entries]),
+				);
+			},
+		};
+		const { runtime } = await createRuntimeForTest(() => {}, { sessionStorage: storage });
+		await runtime.session.prompt("hello");
+		const original = runtime.session.sessionManager.getSessionReference()!;
+		const originalEntries = storage.load(original);
+		const leaf = runtime.session.sessionManager.getLeafId()!;
+		await runtime.fork(leaf, { position: "at" });
+		expect(runtime.session.sessionManager.getSessionReference()).not.toBe(original);
+		expect(runtime.session.sessionFile).toBeUndefined();
+		expect(storage.load(original)).toEqual(originalEntries);
+		expect(records.size).toBe(2);
+		await runtime.newSession();
+		expect(runtime.session.sessionFile).toBeUndefined();
+		expect(records.size).toBe(3);
+		await runtime.switchSession(original);
+		expect(runtime.session.sessionManager.getSessionReference()).toBe(original);
+		expect(runtime.session.sessionManager.getEntries()).toEqual(originalEntries!.slice(1));
+		await expect(runtime.importFromJsonl("/unused.jsonl")).rejects.toThrow("requires file storage");
+	});
 
 	it("persists message_end assistant replacements to the session manager", async () => {
 		const { runtime } = await createRuntimeForTest((pi: ExtensionAPI) => {
