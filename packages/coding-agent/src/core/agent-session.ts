@@ -1103,10 +1103,52 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
-	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	/**
+	 * Continue the current transcript without adding a prompt.
+	 * Uses the same retries, compaction, queued-message handling and settled
+	 * lifecycle as prompt(). Input expansion and before_agent_start do not
+	 * run because no new user input was submitted.
+	 * The core agent owns transcript/queue continuation preconditions.
+	 * @throws Error if the session is busy or model authentication is missing
+	 */
+	async continue(): Promise<void> {
+		if (!this.isIdle) {
+			throw new Error("Agent is already processing. Wait for completion before continuing.");
+		}
+		await this._runAgent(async () => {
+			this._flushPendingBashMessages();
+			this._flushPendingCustomMessages();
+			await this._validateModelAndAuth();
+			await this.agent.continue();
+		});
+	}
+
+	private async _validateModelAndAuth(): Promise<void> {
+		// Validate model
+		if (!this.model) {
+			throw new Error(formatNoModelSelectedMessage());
+		}
+
+		const hasConfiguredAuth =
+			this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
+			(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
+		if (!hasConfiguredAuth) {
+			const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
+			if (isOAuth) {
+				throw new Error(
+					`Authentication failed for "${this.model.provider}". ` +
+						`Credentials may have expired or network is unavailable. ` +
+						`Run '/login ${this.model.provider}' to re-authenticate.`,
+				);
+			}
+			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
+		}
+	}
+
+	private async _runAgent(startRun: () => Promise<void>): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			await this.agent.prompt(messages);
+			await startRun();
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
 			}
@@ -1232,25 +1274,7 @@ export class AgentSession {
 			this._flushPendingBashMessages();
 			this._flushPendingCustomMessages();
 
-			// Validate model
-			if (!this.model) {
-				throw new Error(formatNoModelSelectedMessage());
-			}
-
-			const hasConfiguredAuth =
-				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
-				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
-			if (!hasConfiguredAuth) {
-				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
-				if (isOAuth) {
-					throw new Error(
-						`Authentication failed for "${this.model.provider}". ` +
-							`Credentials may have expired or network is unavailable. ` +
-							`Run '/login ${this.model.provider}' to re-authenticate.`,
-					);
-				}
-				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
-			}
+			await this._validateModelAndAuth();
 
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
@@ -1319,7 +1343,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		await this._runAgentPrompt(messages);
+		await this._runAgent(() => this.agent.prompt(messages));
 	}
 
 	/**
@@ -1507,7 +1531,7 @@ export class AgentSession {
 				this.agent.steer(appMessage);
 			}
 		} else if (options?.triggerTurn) {
-			await this._runAgentPrompt(appMessage);
+			await this._runAgent(() => this.agent.prompt(appMessage));
 		} else if (this.isStreaming) {
 			// Appending now would put the message between an assistant tool call and its
 			// result, which providers that validate message order reject on replay. Defer

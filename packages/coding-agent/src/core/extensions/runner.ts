@@ -298,6 +298,7 @@ export class ExtensionRunner {
 	private staleMessage: string | undefined;
 	private uiPromptDepth = 0;
 	private activeUIPrompt: { kind: UIPromptKind; title?: string } | undefined;
+	private unsubscribeAgentEvents: (() => void) | undefined;
 
 	constructor(
 		extensions: Extension[],
@@ -412,6 +413,15 @@ export class ExtensionRunner {
 			}
 			this.modelRegistry.unregisterProvider(name);
 		};
+
+		this.unsubscribeAgentEvents?.();
+		if (this.runtime.agentEvents) {
+			this.unsubscribeAgentEvents = this.runtime.trackEventBusSubscription(
+				this.runtime.agentEvents.onEvent((event) => {
+					void this.emit(event);
+				}),
+			);
+		}
 	}
 
 	bindCommandContext(actions?: ExtensionCommandContextActions): void {
@@ -858,6 +868,8 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
+					// A reload/dispose may have occurred while an earlier cross-agent handler awaited.
+					if (event.type === "agent_event" && this.staleMessage) return undefined as RunnerEmitResult<TEvent>;
 					const handlerResult = await handler(event, ctx);
 
 					if (this.isSessionBeforeEvent(event) && handlerResult) {

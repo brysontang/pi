@@ -63,11 +63,13 @@ describe("session honors shouldStopAfterTurn", () => {
 				// Follow-ups run after the interrupted task finishes; steering is
 				// delivered before its next response.
 				if (delivery === "followUp") harness.appendResponses([fauxAssistantMessage("Follow-up done")]);
-				await harness.session.agent.continue();
+				await harness.session.continue();
 				expect(harness.faux.state.callCount).toBe(delivery === "steer" ? 2 : 3);
 				expect(executions).toBe(1);
 				expect(getUserTexts(harness)).toEqual(["Work", "Queued work"]);
 				expect(harness.session.pendingMessageCount).toBe(0);
+				expect(harness.eventsOfType("agent_settled")).toHaveLength(2);
+				expect(harness.session.isIdle).toBe(true);
 			});
 		}
 	}

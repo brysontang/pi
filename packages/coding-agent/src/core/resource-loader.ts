@@ -9,6 +9,7 @@ export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import type { AgentEventChannel } from "./agent-events.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
 	clearExtensionCache,
@@ -161,6 +162,8 @@ export interface DefaultResourceLoaderOptions {
 	agentDir: string;
 	settingsManager?: SettingsManager;
 	eventBus?: EventBus;
+	/** Addressed cross-agent communication, separate from the session-local extension event bus. */
+	agentEvents?: AgentEventChannel;
 	additionalExtensionPaths?: string[];
 	additionalSkillPaths?: string[];
 	additionalPromptTemplatePaths?: string[];
@@ -198,6 +201,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private agentDir: string;
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
+	private agentEvents?: AgentEventChannel;
 	private packageManager: DefaultPackageManager;
 	private additionalExtensionPaths: string[];
 	private additionalSkillPaths: string[];
@@ -256,6 +260,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentDir = resolvePath(options.agentDir);
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
 		this.eventBus = options.eventBus ?? createEventBus();
+		this.agentEvents = options.agentEvents;
 		this.packageManager = new DefaultPackageManager({
 			cwd: this.cwd,
 			agentDir: this.agentDir,
@@ -556,7 +561,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const extensionPaths = this.noExtensions
 			? cliEnabledExtensions
 			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
-		const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+		const extensionsResult = await loadExtensionsCached(
+			extensionPaths,
+			this.cwd,
+			this.eventBus,
+			createExtensionRuntime(this.agentEvents),
+		);
 		if (!options.includeInlineFactories) {
 			return extensionsResult;
 		}
@@ -576,7 +586,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		preTrustExtensions: LoadExtensionsResult | undefined,
 	): Promise<LoadExtensionsResult> {
 		if (!preTrustExtensions) {
-			const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+			const extensionsResult = await loadExtensionsCached(
+				extensionPaths,
+				this.cwd,
+				this.eventBus,
+				createExtensionRuntime(this.agentEvents),
+			);
 			const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
 			extensionsResult.extensions.push(...inlineExtensions.extensions);
 			extensionsResult.errors.push(...inlineExtensions.errors);

@@ -46,6 +46,7 @@ import type {
 } from "@earendil-works/pi-tui";
 import type { Static, TSchema } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
+import type { AgentEvent, AgentEventChannel } from "../agent-events.ts";
 import type { BashResult } from "../bash-executor.ts";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
 import type { EventBus } from "../event-bus.ts";
@@ -1085,6 +1086,7 @@ export function isToolCallEventType(toolName: string, event: ToolCallEvent): boo
 /** Union of all event types */
 export type ExtensionEvent =
 	| ProjectTrustEvent
+	| AgentEvent
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent
@@ -1283,6 +1285,7 @@ export interface ExtensionAPI {
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): void;
 	on(event: "agent_settled", handler: ExtensionHandler<AgentSettledEvent>): void;
+	on(event: "agent_event", handler: ExtensionHandler<AgentEvent>): void;
 	on(event: "ui_prompt_start", handler: ExtensionHandler<UIPromptStartEvent>): void;
 	on(event: "ui_prompt_end", handler: ExtensionHandler<UIPromptEndEvent>): void;
 	on(event: "turn_start", handler: ExtensionHandler<TurnStartEvent>): void;
@@ -1379,6 +1382,9 @@ export interface ExtensionAPI {
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
+
+	/** Send an addressed event through the host-supplied channel. Does not prompt or persist anything. */
+	sendAgentEvent(to: string, customType: string, data?: unknown): Promise<void>;
 
 	// =========================================================================
 	// Session Metadata
@@ -1667,6 +1673,8 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
  * Contains flag values (defaults set during registration, CLI values set after).
  */
 export interface ExtensionRuntimeState {
+	/** Composed by the host; absent for sessions without cross-agent communication. */
+	agentEvents?: AgentEventChannel;
 	flagValues: Map<string, boolean | string>;
 	/** Legacy provider-config registrations queued during extension loading, processed when runner binds. */
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; extensionPath: string }>;

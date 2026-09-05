@@ -1,7 +1,6 @@
 // Core session management
 
 export { type Args, parseArgs } from "./cli/args.ts";
-
 // Config paths
 export {
 	CONFIG_DIR_NAME,
@@ -12,6 +11,14 @@ export {
 	getReadmePath,
 	VERSION,
 } from "./config.ts";
+export { type AgentEventPeer, createAgentEventPeer } from "./core/agent-event-ipc.ts";
+export {
+	type AgentEvent,
+	type AgentEventChannel,
+	type AgentEventConnection,
+	AgentEventRouter,
+	type LocalAgentEventChannel,
+} from "./core/agent-events.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,

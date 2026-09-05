@@ -26,6 +26,7 @@ import { CONFIG_DIR_NAME, getAgentDir, isBunBinary, isBundledNode } from "../../
 // avoiding a circular dependency. Extensions can import from @earendil-works/pi-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
+import type { AgentEventChannel } from "../agent-events.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
@@ -174,7 +175,7 @@ function useExtensionCacheCwd(cwd: string): ExtensionCacheToken {
  * Create a runtime with throwing stubs for action methods.
  * Runner.bindCore() replaces these with real implementations.
  */
-export function createExtensionRuntime(): ExtensionRuntime {
+export function createExtensionRuntime(agentEvents?: AgentEventChannel): ExtensionRuntime {
 	const notInitialized = () => {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
 	};
@@ -187,6 +188,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 	};
 
 	const runtime: ExtensionRuntime = {
+		agentEvents,
 		sendMessage: notInitialized,
 		sendUserMessage: notInitialized,
 		appendEntry: notInitialized,
@@ -370,6 +372,13 @@ function createExtensionAPI(
 		appendEntry(customType: string, data?: unknown): void {
 			assertActive();
 			runtime.appendEntry(customType, data);
+		},
+
+		async sendAgentEvent(to: string, customType: string, data?: unknown): Promise<void> {
+			assertActive();
+			if (state !== "active") throw new Error("Agent events cannot be sent during extension loading");
+			if (!runtime.agentEvents) throw new Error("No agent event channel is connected to this session");
+			await runtime.agentEvents.send(to, customType, data);
 		},
 
 		setSessionName(name: string): void {
