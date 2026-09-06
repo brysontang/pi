@@ -48,12 +48,24 @@ and its normal storage, tools, model and extensions. The channel does not launch
 processes, duplicate RPC controls, own an agent loop, or select a persistence
 backend. Stdout and the RPC stream are untouched.
 
-An alternative transport implements `AgentEventConnection` on the router side
-and `AgentEventChannel` on the session side. Failed custom transports do not fall
-back to local delivery. The host must bind addresses from its trusted connection
-metadata and enforce any access policy before attaching peers. A router connects
-all explicitly attached addresses; it is not an authorization system. A local
-child process is not a security sandbox.
+For another message transport, use `createAgentEventTransportPeer(transport)` on
+both sides. It runs the same protocol as the Node IPC adapter, including payload
+validation, delivery acceptance, timeouts and disconnect handling. Implement only
+`AgentEventTransport.send`, `onMessage` and `onClose`; do not duplicate the event
+protocol. The transport must deliver ordered messages over a live bidirectional
+connection, reject failed sends, and report terminal closure (including when a
+close subscriber attaches after closure). It must not retry or replay messages.
+The peer releases its subscriptions when closed; the host owns the underlying
+transport's lifecycle.
+
+For integrations that already provide their own protocol, `AgentEventConnection`
+and `AgentEventChannel` remain the router-side and session-side interfaces.
+Failed custom transports do not fall back to local delivery. The host must bind
+addresses from its trusted connection metadata and enforce access policy before
+attaching peers. A router connects all explicitly attached addresses; it is not
+an authorization system. The host must supply any required authentication and
+encryption before handing a transport to the peer. Neither the protocol nor the
+Node IPC adapter adds encryption. A local child process is not a security sandbox.
 
 Close the peer when its owning worker ends; this closes only the event channel.
 It does not kill the process or dispose its session. The host owns those native

@@ -11,7 +11,12 @@ export {
 	getReadmePath,
 	VERSION,
 } from "./config.ts";
-export { type AgentEventPeer, createAgentEventPeer } from "./core/agent-event-ipc.ts";
+export { createAgentEventPeer } from "./core/agent-event-ipc.ts";
+export {
+	type AgentEventPeer,
+	type AgentEventTransport,
+	createAgentEventTransportPeer,
+} from "./core/agent-event-transport.ts";
 export {
 	type AgentEvent,
 	type AgentEventChannel,
