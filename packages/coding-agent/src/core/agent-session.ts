@@ -33,6 +33,8 @@ import type {
 	Model,
 	ProviderHeaders,
 	TextContent,
+	ToolCall,
+	ToolResultMessage,
 	Usage,
 } from "@earendil-works/pi-ai/compat";
 import {
@@ -1109,13 +1111,57 @@ export class AgentSession {
 	 * lifecycle as prompt(). Input expansion and before_agent_start do not
 	 * run because no new user input was submitted.
 	 * The core agent owns transcript/queue continuation preconditions.
+	 * An optional result records a delayed outcome for a call in the selected
+	 * terminal tool batch before continuing. Prior results remain in history;
+	 * context uses the latest result. This emits native message events, not a
+	 * second tool execution, and never invokes the tool or input expansion.
+	 * The caller owns execution/authorization. Result delivery is persisted even
+	 * if model authentication or the subsequent inference fails.
 	 * @throws Error if the session is busy or model authentication is missing
 	 */
-	async continue(): Promise<void> {
+	async continue(result?: ToolResultMessage): Promise<void> {
 		if (!this.isIdle) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
 		}
+		const incoming = result === undefined ? undefined : structuredClone(result);
+		if (incoming !== undefined) {
+			const messages = this.sessionManager.buildSessionContext().messages;
+			const batch: ToolResultMessage[] = [];
+			let assistant: AssistantMessage | undefined;
+			for (let i = messages.length - 1; i >= 0; i--) {
+				const message = messages[i];
+				if (message.role === "toolResult") batch.push(message);
+				else {
+					if (message.role === "assistant") assistant = message;
+					break;
+				}
+			}
+			const calls = assistant?.content.filter(
+				(block): block is ToolCall => block.type === "toolCall" && block.id === incoming.toolCallId,
+			);
+			if (
+				incoming.role !== "toolResult" ||
+				calls?.length !== 1 ||
+				calls[0].name !== incoming.toolName ||
+				!batch.some(
+					(message) => message.toolCallId === incoming.toolCallId && message.toolName === incoming.toolName,
+				)
+			) {
+				throw new Error("Delayed tool result must match a call in the selected terminal tool batch");
+			}
+		}
 		await this._runAgent(async () => {
+			if (incoming !== undefined) {
+				await this._handleAgentEvent({ type: "message_start", message: incoming });
+				this.agent.state.messages.push(incoming);
+				try {
+					await this._handleAgentEvent({ type: "message_end", message: incoming });
+				} finally {
+					// Restore only committed native context, including after a rejected
+					// storage write. Never leave an unpersisted result in the live agent.
+					this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+				}
+			}
 			this._flushPendingBashMessages();
 			this._flushPendingCustomMessages();
 			await this._validateModelAndAuth();

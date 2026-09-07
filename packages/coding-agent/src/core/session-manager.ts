@@ -464,13 +464,46 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 	return [];
 }
 
+/** A later native result updates the same call within its assistant batch.
+ * Keep every entry in audit history, but expose one result per call to context.
+ * IDs reused by another assistant batch never replace earlier results. */
+function resolveToolResultEntries(entries: SessionEntry[]): SessionEntry[] {
+	const resolved: Array<SessionEntry | undefined> = [];
+	let calls = new Map<string, string | undefined>();
+	const positions = new Map<string, number>();
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.message.role === "toolResult") {
+			const message = entry.message;
+			if (calls.get(message.toolCallId) === message.toolName) {
+				const previous = positions.get(message.toolCallId);
+				if (previous !== undefined) resolved[previous] = undefined;
+				positions.set(message.toolCallId, resolved.length);
+			}
+		} else if (sessionEntryToContextMessages(entry).length > 0) {
+			calls = new Map();
+			positions.clear();
+			if (entry.type === "message" && entry.message.role === "assistant") {
+				for (const block of entry.message.content ?? []) {
+					if (block.type === "toolCall") {
+						// Malformed batches with reused IDs cannot identify one call.
+						calls.set(block.id, calls.has(block.id) ? undefined : block.name);
+					}
+				}
+			}
+		}
+		resolved.push(entry);
+	}
+	return resolved.filter((entry): entry is SessionEntry => entry !== undefined);
+}
+
 /**
  * Build the active, compaction-aware session entry list.
  *
  * This follows the current leaf path. If the path contains compaction entries,
  * the latest compaction is represented by the compaction entry itself, followed
  * by the kept entries starting at firstKeptEntryId and all entries after the
- * compaction entry. Older summarized entries are omitted.
+ * compaction entry. Older summarized entries and superseded results within
+ * an assistant's tool batch are omitted. getBranch()/getEntries() retain them.
  */
 export function buildContextEntries(
 	entries: SessionEntry[],
@@ -487,12 +520,12 @@ export function buildContextEntries(
 	}
 
 	if (!compaction) {
-		return path;
+		return resolveToolResultEntries(path);
 	}
 
 	const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
 	if (compactionIdx < 0) {
-		return path;
+		return resolveToolResultEntries(path);
 	}
 
 	const contextEntries: SessionEntry[] = [compaction];
@@ -507,7 +540,7 @@ export function buildContextEntries(
 		}
 	}
 	contextEntries.push(...path.slice(compactionIdx + 1));
-	return contextEntries;
+	return resolveToolResultEntries(contextEntries);
 }
 
 /**
