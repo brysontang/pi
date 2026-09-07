@@ -22,6 +22,7 @@ export {
 	type AgentEventChannel,
 	type AgentEventConnection,
 	AgentEventRouter,
+	type AgentEventRouterOptions,
 	type LocalAgentEventChannel,
 } from "./core/agent-events.ts";
 export {
